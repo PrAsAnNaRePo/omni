@@ -92,7 +92,7 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", required=True)
     parser.add_argument("--vocab_file_name", default="vocab.bpe")
-    parser.add_argument("--merge_file_name", default="merges.json")
+    parser.add_argument("--merge_file_name", default="merges.bpe")
     parser.add_argument("--special_tokens", nargs="*", help="Special tokens")
     args = parser.parse_args()
 
