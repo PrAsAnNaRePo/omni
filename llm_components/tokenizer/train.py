@@ -1,14 +1,15 @@
 import argparse
+import time
 import regex
 from collections import Counter
 from copy import copy
 import pickle
 
 class TrainTokenizer:
-    def __init__(self, special_tokens:list, vocab_save_file: str, merges_save_file: str):
+    def __init__(self, special_tokens: list, vocab_save_file: str, merges_save_file: str):
         self.vocab = {}
         self.merges = {}
-        self.special_tokens = special_tokens
+        self.special_tokens = special_tokens or []
         pat_str = r"|".join([
             r"""[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?""",
             r"""[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?""",
@@ -19,91 +20,117 @@ class TrainTokenizer:
             r"""\s+""",
         ])
         self.token_pattern = regex.compile(pat_str)
-
         self.vocab_save_file = vocab_save_file
         self.merges_save_file = merges_save_file
 
-    def __get_pairs(self, tokens: list[int]) -> list[tuple[int,int]]:
+    def __get_pairs(self, tokens: list[int]) -> list[tuple[int, int]]:
         return [(tokens[i], tokens[i+1]) for i in range(len(tokens)-1)]
 
-    def __get_pairs_count(self, pairs: list[tuple[int,int]]) -> dict:
+    def __get_pairs_count(self, pairs: list[tuple[int, int]]) -> dict:
         return Counter(pairs)
 
-    def __get_merges(self, pairs_count: dict, max_tok: int) -> dict:
-        merges = {}
-        for pair, count in sorted(pairs_count.items(), key=lambda x: x[1], reverse=True):
-            if count > 1:
-                max_tok += 1
-                merges[pair] = max_tok
-        return merges
-
-    def __apply_bpe_merges(self, raw_tokens, merges):
-        merged = copy(raw_tokens)
-        for pair, new_tok in merges.items():
-            idx = 0
-            while idx < len(merged)-1:
-                if (merged[idx], merged[idx+1]) == pair:
-                    merged[idx] = new_tok
-                    merged.pop(idx+1)
-                else:
-                    idx += 1
+    def __apply_merge(self, tokens: list[int], pair: tuple[int, int], new_token: int) -> list[int]:
+        """Apply a single merge operation to the token list"""
+        merged = []
+        i = 0
+        while i < len(tokens):
+            if i < len(tokens) - 1 and (tokens[i], tokens[i+1]) == pair:
+                merged.append(new_token)
+                i += 2
+            else:
+                merged.append(tokens[i])
+                i += 1
         return merged
 
-    def train(self, data: str):
+    def train(self, data: str, max_vocab_size: int = 10000):
         self.vocab = {i: bytes([i]) for i in range(256)}
-
-        # adding +1 for UNK token
-        self.vocab[256] = '<|UNK|>'
-        current_token = 255 + 1
-
+        
+        self.vocab[256] = b'<|UNK|>'
+        current_token_id = 256
+        
         substrings = self.token_pattern.findall(data)
         tokens = []
         for chunk in substrings:
             tokens.extend(chunk.encode('utf-8'))
-        tokens = tokens[:10000]
-
-        while True:
-            pairs = self.__get_pairs(tokens)
-            pairs_count = self.__get_pairs_count(pairs)
-            if pairs_count and max(pairs_count.values()) >= 2:
-                print('Merging...')
-                self.merges.update(self.__get_merges(pairs_count, current_token))
-                tokens = self.__apply_bpe_merges(tokens, self.merges)
-                for (p0,p1), new_tok in self.merges.items():
-                    self.vocab[new_tok] = self.vocab[p0] + self.vocab[p1]
-                current_token = max(tokens)
-                print("vocab size: ", len(self.vocab))
-            else:
-                break
         
-        curr_max_vocab_size = max(list(self.vocab.keys()))
+        # tokens = tokens[:100_000]
+        print(f"Initial tokens: {len(tokens)}")
+        print(f"Initial vocab size: {len(self.vocab)}")
+        
+        iteration = 0
+        while len(self.vocab) < max_vocab_size:
+            pairs = self.__get_pairs(tokens)
+            if not pairs:
+                break
+            
+            pairs_count = self.__get_pairs_count(pairs)
+            
+            if not pairs_count:
+                break
+            
+            most_frequent_pair = max(pairs_count.items(), key=lambda x: x[1])
+            pair, count = most_frequent_pair
+            
+            if count < 2:
+                break
+            
+            current_token_id += 1
+            new_token_id = current_token_id
+            
+            self.merges[pair] = new_token_id
+            
+            self.vocab[new_token_id] = self.vocab[pair[0]] + self.vocab[pair[1]]
+            
+            tokens = self.__apply_merge(tokens, pair, new_token_id)
+            
+            iteration += 1
+            if iteration % 100 == 0:
+                print(f"Iteration {iteration}: Merged {pair} -> {new_token_id} (count: {count})")
+                print(f"Vocab size: {len(self.vocab)}, Tokens: {len(tokens)}")
+        
         if self.special_tokens:
             for token in self.special_tokens:
-                curr_max_vocab_size+=1
-                self.vocab[curr_max_vocab_size] = token
-
+                current_token_id += 1
+                self.vocab[current_token_id] = token.encode('utf-8') if isinstance(token, str) else token
+        
+        print(f"Training completed!")
+        print(f"Final vocab size: {len(self.vocab)}")
+        print(f"Number of merges: {len(self.merges)}")
+        
         with open(self.vocab_save_file, 'wb') as vocab_file:
             pickle.dump(self.vocab, vocab_file)
         
         with open(self.merges_save_file, 'wb') as merge_file:
             pickle.dump(self.merges, merge_file)
+        
+        print(f"Saved vocab to {self.vocab_save_file}")
+        print(f"Saved merges to {self.merges_save_file}")
 
-if __name__=="__main__":
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", required=True)
-    parser.add_argument("--vocab_file_name", default="vocab.bpe")
-    parser.add_argument("--merge_file_name", default="merges.bpe")
-    parser.add_argument("--special_tokens", nargs="*", help="Special tokens")
+    parser.add_argument("--data", required=True, help="Path to training data file")
+    parser.add_argument("--vocab_file_name", default="vocab.bpe", help="Vocabulary save file")
+    parser.add_argument("--merge_file_name", default="merges.bpe", help="Merges save file")
+    parser.add_argument("--special_tokens", nargs="*", help="Special tokens to add")
+    parser.add_argument("--max_vocab_size", type=int, default=10000, help="Maximum vocabulary size")
     args = parser.parse_args()
 
-    data = open(args.data).read()
-    print("data preview ===>")
-    print(data[:50])
-    print("====>")
-    tok = TrainTokenizer(
+    try:
+        with open(args.data, 'r', encoding='utf-8') as f:
+            data = f.read()
+    except FileNotFoundError:
+        print(f"Error: Could not find data file '{args.data}'")
+        exit(1)
+    except UnicodeDecodeError:
+        with open(args.data, 'r', encoding='utf-8', errors='replace') as f:
+            data = f.read()
+    
+    tokenizer = TrainTokenizer(
         special_tokens=args.special_tokens,
         vocab_save_file=args.vocab_file_name,
         merges_save_file=args.merge_file_name
     )
-    print("Initiating training...")
-    tok.train(data=data)
+    
+    start_time = time.time()
+    tokenizer.train(data=data, max_vocab_size=args.max_vocab_size)
+    print(f"All done in {(time.time() - start_time):.2f}s")

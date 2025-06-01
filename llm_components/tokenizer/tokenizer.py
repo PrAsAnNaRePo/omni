@@ -22,30 +22,41 @@ class Tokenizer:
         ])
         self.token_pattern = regex.compile(pat_str)
 
-    def __apply_bpe_merges(self, raw_tokens, merges):
-        merged = copy(raw_tokens)
-        for pair, new_tok in merges.items():
-            idx = 0
-            while idx < len(merged)-1:
-                if (merged[idx], merged[idx+1]) == pair:
-                    merged[idx] = new_tok
-                    merged.pop(idx+1)
-                else:
-                    idx += 1
+    def __apply_merge(self, tokens: list[int], pair: tuple[int, int], new_token: int) -> list[int]:
+        merged = []
+        i = 0
+        while i < len(tokens):
+            if i < len(tokens) - 1 and (tokens[i], tokens[i+1]) == pair:
+                merged.append(new_token)
+                i += 2
+            else:
+                merged.append(tokens[i])
+                i += 1
         return merged
 
-    def encode(self, text: str):
-        substrings = self.token_pattern.findall(text)
-        tokens = []
-        for chunk in substrings:
-            tokens.extend(chunk.encode('utf-8'))
-        return self.__apply_bpe_merges(tokens, self.merges)
+    def encode(self, text: str) -> list[int]:
+        tokens = list(text.encode('utf-8'))
+        
+        for pair, new_token_id in self.merges.items():
+            tokens = self.__apply_merge(tokens, pair, new_token_id)
+        
+        return tokens
 
-    def decode(self, tokens: list[int]):
-        return ''.join(self.vocab[i].decode('utf-8') for i in tokens)
+    def decode(self, tokens: list[int]) -> str:
+        byte_data = b''
+        for token_id in tokens:
+            if token_id in self.vocab:
+                byte_data += self.vocab[token_id]
+            else:
+                byte_data += self.vocab.get(256, b'<|UNK|>')
+        
+        try:
+            return byte_data.decode('utf-8')
+        except UnicodeDecodeError:
+            return byte_data.decode('utf-8', errors='replace')
 
 # usage
-#tok = Tokenizer()
-#t = tok.encode("return [(tokens[i], tokens[i+1]) for i in range(len(tokens)-1)]")
-#print(len(t))
-#print(tok.decode(t))
+# tok = Tokenizer()
+# t = tok.encode("return [(tokens[i], tokens[i+1]) for i in range(len(tokens)-1)]")
+# print(len(t))
+# print(tok.decode(t))
