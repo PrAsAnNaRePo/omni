@@ -4,6 +4,7 @@ import regex
 from collections import Counter
 from copy import copy
 import pickle
+from tqdm import tqdm
 
 class TrainTokenizer:
     def __init__(self, special_tokens: list, vocab_save_file: str, merges_save_file: str):
@@ -42,7 +43,7 @@ class TrainTokenizer:
                 i += 1
         return merged
 
-    def train(self, data: str, max_vocab_size: int = 10000):
+    def train(self, data: str, max_vocab_size: int = 10000, logging_step=100):
         self.vocab = {i: bytes([i]) for i in range(256)}
         
         self.vocab[256] = b'<|UNK|>'
@@ -58,7 +59,10 @@ class TrainTokenizer:
         print(f"Initial vocab size: {len(self.vocab)}")
         
         iteration = 0
+        p_bar = tqdm(total=max_vocab_size - len(self.vocab))
+
         while len(self.vocab) < max_vocab_size:
+            old_vocab_len = len(self.vocab)
             pairs = self.__get_pairs(tokens)
             if not pairs:
                 break
@@ -83,8 +87,9 @@ class TrainTokenizer:
             
             tokens = self.__apply_merge(tokens, pair, new_token_id)
             
+            p_bar.update(len(self.vocab) - old_vocab_len)
             iteration += 1
-            if iteration % 100 == 0:
+            if iteration % logging_step == 0:
                 print(f"Iteration {iteration}: Merged {pair} -> {new_token_id} (count: {count})")
                 print(f"Vocab size: {len(self.vocab)}, Tokens: {len(tokens)}")
         
@@ -113,6 +118,7 @@ if __name__ == "__main__":
     parser.add_argument("--merge_file_name", default="merges.bpe", help="Merges save file")
     parser.add_argument("--special_tokens", nargs="*", help="Special tokens to add")
     parser.add_argument("--max_vocab_size", type=int, default=10000, help="Maximum vocabulary size")
+    parser.add_argument("--logging_step", type=int, default=100, help="Logging step size")
     args = parser.parse_args()
 
     try:
@@ -132,5 +138,5 @@ if __name__ == "__main__":
     )
     
     start_time = time.time()
-    tokenizer.train(data=data, max_vocab_size=args.max_vocab_size)
+    tokenizer.train(data=data, max_vocab_size=args.max_vocab_size, logging_step=args.logging_step)
     print(f"All done in {(time.time() - start_time):.2f}s")
