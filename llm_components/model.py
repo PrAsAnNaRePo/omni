@@ -99,23 +99,27 @@ class GPT(nn.Module):
         
         x = self.ln(x)
         logits = self.lm_head(x)
-        return logits
 
-gpt = GPT(
-    vocab_size=32_000,
-    embed_dim=768,
-    max_seq_len=2048,
-    num_heads=8,
-    head_dim=64,
-    num_layers=2,
-    attn_dropout=0.2,
-    ff_dropout=0.2
-)
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+            return logits, loss
+        return logits, None
 
-print(gpt)
+# gpt = GPT(
+#     vocab_size=32_000,
+#     embed_dim=768,
+#     max_seq_len=2048,
+#     num_heads=8,
+#     head_dim=64,
+#     num_layers=2,
+#     attn_dropout=0.2,
+#     ff_dropout=0.2
+# )
 
-input = torch.randint(0, 10, (1, 10))
+# print(gpt)
 
-output = gpt(input)
-print(output.shape)
+# input = torch.randint(0, 10, (1, 10))
+# target = torch.randint(0, 10, (1, 10))
+# output = gpt(input, target)
+# print(output[1])
 

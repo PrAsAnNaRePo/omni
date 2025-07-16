@@ -33,10 +33,12 @@ class Tokenizer:
                 merged.append(tokens[i])
                 i += 1
         return merged
+    
+    def __len__(self):
+        return len(self.vocab)
 
     def encode(self, text: str) -> list[int]:
-        tokens = list(text.encode('utf-8'))
-        
+        tokens = list(text.encode('utf-8'))   
         for pair, new_token_id in self.merges.items():
             tokens = self.__apply_merge(tokens, pair, new_token_id)
         
