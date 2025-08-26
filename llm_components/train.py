@@ -11,7 +11,7 @@ def train():
     tokenizer = Tokenizer("tokenizer/vocab.bpe", "tokenizer/merges.bpe")
     ds = UnsupervisedDataset(data_file, tokenizer, ctx_lim=350)
 
-    model = GPT(len(tokenizer), embed_dim=512, max_seq_len=350, num_heads=12, head_dim=68, num_layers=4, attn_dropout=0.1, ff_dropout=0.1)
+    model = GPT(len(tokenizer), embed_dim=512, max_seq_len=350, num_heads=12, head_dim=68, num_layers=4, attn_dropout=0.1, num_experts=8, top_k=2, ff_dropout=0.1)
 
     loader = DataLoader(ds, batch_size=4)
 
@@ -24,6 +24,7 @@ def train():
             loss = model(x, y)[-1]
             loss.backward()
             optim.step()
+            print(f"[{idx}] ==> Loss {loss.item()}")
         
         print(f"Epoch {epoch+1} | Loss {loss.item()}")
 

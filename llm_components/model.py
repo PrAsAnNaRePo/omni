@@ -16,21 +16,49 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.layers(x)
 
+class Moe(nn.Module):
+    def __init__(self, embed_dim: int, num_experts: int, k: int):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_experts = num_experts
+        self.k = k
+
+        self.gater = nn.Linear(embed_dim, num_experts)
+        self.experts = nn.ModuleList([FeedForward(embed_dim, 0.1) for _ in range(num_experts)])
+
+    def forward(self, x: torch.Tensor):
+        b, seq_len, _ = x.size()
+        score = self.gater(x) # score -> (b, seq_len, num_experts)
+
+        sftm_scores = torch.softmax(score, dim=-1)
+        top_k_vals, top_k_ind = self.get_topk(sftm_scores)
+        output = torch.zeros_like(x)
+        for batch in range(b):
+            for i, vals, ind in zip(range(seq_len), top_k_vals[batch], top_k_ind[batch]):
+                output[batch, i, :] = sum([ self.experts[ind[k]](x[batch, i, :].unsqueeze(0)) * vals[k] for k in range(len(ind)) ]) # this should be in shape of (1, 1, embed_dim)
+
+        return output
+
+    def get_topk(self, x):
+        with torch.no_grad():
+            return torch.topk(x, k=self.k)
+
+
 class TransformerBlock(nn.Module):
-    def __init__(self, embed_dim, num_heads, head_dim, max_seq_len, attn_dropout, ff_dropout):
+    def __init__(self, embed_dim, num_heads, head_dim, max_seq_len, attn_dropout, num_experts, topk, ff_dropout):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = head_dim
 
         self.mha = MHA(num_heads, head_dim, embed_dim, max_seq_len, attn_dropout)
-        self.ln = FeedForward(embed_dim, ff_dropout)
+        self.moe = Moe(embed_dim, num_experts, topk)
         self.layer_norm1 = nn.LayerNorm(embed_dim)
         self.layer_norm2 = nn.LayerNorm(embed_dim)
     
     def forward(self, x):
         x = x + self.mha(self.layer_norm1(x))
-        x = x + self.ln(self.layer_norm2(x))
+        x = x + self.moe(self.layer_norm2(x))
         return x
 
 class MHA(nn.Module):
@@ -76,6 +104,8 @@ class GPT(nn.Module):
             head_dim: int,
             num_layers: int,
             attn_dropout: float,
+            num_experts: int,
+            top_k: int,
             ff_dropout: float
     ):
         super().__init__()
@@ -83,13 +113,13 @@ class GPT(nn.Module):
         self.wte = nn.Embedding(vocab_size, embed_dim)
         self.wpe = nn.Embedding(max_seq_len, embed_dim)
 
-        self.blocks = nn.ModuleList([ TransformerBlock(embed_dim, num_heads, head_dim, max_seq_len, attn_dropout, ff_dropout) for i in range(num_layers) ])
+        self.blocks = nn.ModuleList([ TransformerBlock(embed_dim, num_heads, head_dim, max_seq_len, attn_dropout, num_experts, top_k, ff_dropout) for i in range(num_layers) ])
         
         self.ln = nn.LayerNorm(embed_dim)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
-    def forward(self, idx: torch.Tensor, targets: torch.Tensor = None):
-        b, t = idx.shape
+    def forward(self, idx: torch.Tensor, targets: torch.Tensor | None = None):
+        _, t = idx.shape
         token_embeddings = self.wte(idx)
         position_embeddings = self.wpe(torch.arange(t, device=idx.device))
         x = token_embeddings + position_embeddings
@@ -113,13 +143,15 @@ class GPT(nn.Module):
 #     head_dim=64,
 #     num_layers=2,
 #     attn_dropout=0.2,
+#     num_experts=8,
+#     top_k=2,
 #     ff_dropout=0.2
 # )
-
+#
 # print(gpt)
-
+#
 # input = torch.randint(0, 10, (1, 10))
 # target = torch.randint(0, 10, (1, 10))
 # output = gpt(input, target)
 # print(output[1])
-
+#
