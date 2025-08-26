@@ -1,6 +1,6 @@
 import math
 import torch
-from torch import nn
+from torch import dropout, nn
 import torch.nn.functional as F
 
 class FeedForward(nn.Module):
@@ -17,13 +17,14 @@ class FeedForward(nn.Module):
         return self.layers(x)
 
 class Moe(nn.Module):
-    def __init__(self, embed_dim: int, num_experts: int, k: int):
+    def __init__(self, embed_dim: int, num_experts: int, k: int, dropout: float):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_experts = num_experts
         self.k = k
 
         self.gater = nn.Linear(embed_dim, num_experts)
+        self.shared_expert = FeedForward(embed_dim, dropout)
         self.experts = nn.ModuleList([FeedForward(embed_dim, 0.1) for _ in range(num_experts)])
 
     def forward(self, x: torch.Tensor):
@@ -35,7 +36,7 @@ class Moe(nn.Module):
         output = torch.zeros_like(x)
         for batch in range(b):
             for i, vals, ind in zip(range(seq_len), top_k_vals[batch], top_k_ind[batch]):
-                output[batch, i, :] = sum([ self.experts[ind[k]](x[batch, i, :].unsqueeze(0)) * vals[k] for k in range(len(ind)) ]) # this should be in shape of (1, 1, embed_dim)
+                output[batch, i, :] = sum([ self.experts[ind[k]](x[batch, i, :].unsqueeze(0)) * vals[k] + self.shared_expert(x[batch, i, :].unsqueeze(0)) for k in range(len(ind)) ]) # this should be in shape of (1, 1, embed_dim)
 
         return output
 
@@ -52,7 +53,7 @@ class TransformerBlock(nn.Module):
         self.head_dim = head_dim
 
         self.mha = MHA(num_heads, head_dim, embed_dim, max_seq_len, attn_dropout)
-        self.moe = Moe(embed_dim, num_experts, topk)
+        self.moe = Moe(embed_dim, num_experts, topk, ff_dropout)
         self.layer_norm1 = nn.LayerNorm(embed_dim)
         self.layer_norm2 = nn.LayerNorm(embed_dim)
     
@@ -135,23 +136,23 @@ class GPT(nn.Module):
             return logits, loss
         return logits, None
 
-# gpt = GPT(
-#     vocab_size=32_000,
-#     embed_dim=768,
-#     max_seq_len=2048,
-#     num_heads=8,
-#     head_dim=64,
-#     num_layers=2,
-#     attn_dropout=0.2,
-#     num_experts=8,
-#     top_k=2,
-#     ff_dropout=0.2
-# )
-#
-# print(gpt)
-#
-# input = torch.randint(0, 10, (1, 10))
-# target = torch.randint(0, 10, (1, 10))
-# output = gpt(input, target)
-# print(output[1])
-#
+gpt = GPT(
+    vocab_size=32_000,
+    embed_dim=768,
+    max_seq_len=2048,
+    num_heads=8,
+    head_dim=64,
+    num_layers=2,
+    attn_dropout=0.2,
+    num_experts=8,
+    top_k=2,
+    ff_dropout=0.2
+)
+
+print(gpt)
+
+input = torch.randint(0, 10, (1, 10))
+target = torch.randint(0, 10, (1, 10))
+output = gpt(input, target)
+print(output[1])
+
