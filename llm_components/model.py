@@ -33,12 +33,15 @@ class Moe(nn.Module):
 
         sftm_scores = torch.softmax(score, dim=-1)
         top_k_vals, top_k_ind = self.get_topk(sftm_scores)
+
+        shared_expert_output = self.shared_expert(x)
+
         output = torch.zeros_like(x)
         for batch in range(b):
             for i, vals, ind in zip(range(seq_len), top_k_vals[batch], top_k_ind[batch]):
-                output[batch, i, :] = sum([ self.experts[ind[k]](x[batch, i, :].unsqueeze(0)) * vals[k] + self.shared_expert(x[batch, i, :].unsqueeze(0)) for k in range(len(ind)) ]) # this should be in shape of (1, 1, embed_dim)
+                output[batch, i, :] = sum([ self.experts[ind[k]](x[batch, i, :].unsqueeze(0)) * vals[k]) for k in range(len(ind)) ]) # this should be in shape of (1, 1, embed_dim)
 
-        return output
+        return output + shared_expert_output
 
     def get_topk(self, x):
         with torch.no_grad():
