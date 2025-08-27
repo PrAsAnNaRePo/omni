@@ -23,7 +23,7 @@ class Moe(nn.Module):
         self.num_experts = num_experts
         self.k = k
 
-        self.gater = nn.Linear(embed_dim, num_experts)
+        self.gater = nn.Linear(embed_dim, num_experts, bias=False)
         self.shared_expert = FeedForward(embed_dim, dropout)
         self.experts = nn.ModuleList([FeedForward(embed_dim, 0.1) for _ in range(num_experts)])
 
